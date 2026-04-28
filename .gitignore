@@ -1,0 +1,52 @@
+# Build directories
+build/
+bin/
+Release/
+Debug/
+*.o
+*.obj
+*.exe
+*.a
+*.lib
+
+# IDE and Editor files
+.vscode/
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.cbp
+*.layout
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+restaurant.db
+
+# Node.js (if keeping frontend separately)
+node_modules/
+package-lock.json
+npm-debug.log
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.directory
+
+# Dependencies
+include/crow_all.h (optional - or keep if bundled)
+vcpkg_installed/
+
+# Temporary files
+*.tmp
+*.bak
+*.temp

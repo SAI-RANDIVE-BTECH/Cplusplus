@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Background gradient -->
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#9b4500;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#b45309;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffb020;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ffd699;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Circle background -->
+  <circle cx="100" cy="100" r="95" fill="url(#grad1)"/>
+
+  <!-- Fork -->
+  <g transform="translate(100, 100)">
+    <!-- Fork handle -->
+    <rect x="-8" y="30" width="16" height="45" rx="8" fill="#ffb020"/>
+
+    <!-- Fork prongs -->
+    <g fill="#ffb020">
+      <!-- Left prong -->
+      <rect x="-35" y="-15" width="8" height="50" rx="4"/>
+      <!-- Middle prong -->
+      <rect x="-8" y="-15" width="8" height="50" rx="4"/>
+      <!-- Right prong -->
+      <rect x="19" y="-15" width="8" height="50" rx="4"/>
+    </g>
+
+    <!-- Decorative elements -->
+    <!-- Plate circle -->
+    <circle cx="0" cy="-35" r="25" fill="none" stroke="#ffb020" stroke-width="3" opacity="0.3"/>
+    <!-- Leaf accent -->
+    <path d="M 40 -20 Q 45 -10 40 0" fill="none" stroke="#ffb020" stroke-width="2" opacity="0.6"/>
+  </g>
+
+  <!-- Text -->
+  <text x="100" y="180" font-family="Playfair Display, serif" font-size="16" font-weight="bold" text-anchor="middle" fill="#ffb020">AKSHAY</text>
+</svg>
