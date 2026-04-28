@@ -802,6 +802,28 @@ tbody tr:hover {
   }
 }
 
+/* ============= LOGO STYLES ============= */
+.logo-image {
+  height: 60px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+}
+
+.sidebar-logo {
+  height: 80px;
+  margin-bottom: 15px;
+}
+
+.login-logo {
+  height: 100px;
+  margin-bottom: 20px;
+}
+
+.header-left .logo-image {
+  height: 50px;
+}
+
 /* ============= SCROLLBAR ============= */
 ::-webkit-scrollbar {
   width: 10px;

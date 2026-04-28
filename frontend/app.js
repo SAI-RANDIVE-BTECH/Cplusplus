@@ -261,7 +261,7 @@ const App = {
         <!-- Header -->
         <div class="customer-header">
           <div class="header-left">
-            <h2 style="margin:0; color: #903f00;">🍜 Akshay Bhojanam</h2>
+            <img src="/assets/अक्षय.svg" alt="Akshay Bhojanam" class="logo-image">
           </div>
           <div class="header-center">
             <h3 style="margin:0; color: #333;">Welcome, ${this.user.name}</h3>
@@ -366,7 +366,7 @@ const App = {
         <!-- Sidebar Navigation -->
         <div class="sidebar">
           <div class="sidebar-header">
-            <h2>🍜 Akshay Bhojanam</h2>
+            <img src="/assets/अक्षय.svg" alt="Akshay Bhojanam" class="logo-image sidebar-logo">
             <p>${this.user.name}</p>
             <p class="role-badge">${this.user.role.toUpperCase()}</p>
           </div>
@@ -593,7 +593,7 @@ const App = {
     container.innerHTML = `
       <div class="login-container">
         <div class="login-box">
-          <h1>🍜 Akshay Bhojanam</h1>
+          <img src="/assets/अक्षय.svg" alt="Akshay Bhojanam" class="logo-image login-logo">
           <h2>Restaurant Management System</h2>
           
           <div class="form-tabs">
