@@ -50,3 +50,7 @@ vcpkg_installed/
 *.tmp
 *.bak
 *.temp
+"temp_crow/"  
+"*.db"  
+"build/"  
+"node_modules/" 
