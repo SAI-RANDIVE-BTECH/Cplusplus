@@ -1,0 +1,35 @@
+
+> akshay-bhojanam@1.0.0 start
+> node server.js
+
+
+======================================================================
+████████████████████████████████████████████████████████████████
+█                                                              █
+█   AKSHAY BHOJANAM - RESTAURANT MANAGEMENT SYSTEM             █
+█                                                              █
+████████████████████████████████████████████████████████████████
+
+🚀 Server running on http://localhost:8080
+🎨 Dashboard: http://localhost:8080/index.html
+
+💳 Razorpay Integration: ACTIVE (TEST MODE)
+   Key ID: rzp_test_RzYF4GJPLG8zoR
+
+📖 Login Credentials:
+   👔 Owner:    apurva_sanpurkar / apurva@2024
+   💼 Manager:  shripad_deshpande / staff@2024
+   🪑 Waiter:   parth_sahasrabuddhe / staff@2024
+   🛍️  Customer: rajesh_kumar / customer@2024
+   🛍️  Customer: priya_sharma / customer@2024
+
+✓ Database initialized with menu items
+✓ Customer ordering interface enabled
+✓ Dynamic billing system active
+✓ All API endpoints active
+✓ Static files serving
+✓ Razorpay integration ready
+
+Press Ctrl+C to stop...
+======================================================================
+
