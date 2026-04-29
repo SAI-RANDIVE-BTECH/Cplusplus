@@ -1,144 +1,698 @@
-const App = {
-  token: localStorage.getItem("ab_token")||null,
-  user: JSON.parse(localStorage.getItem("ab_user")||"null"),
-  page: localStorage.getItem("ab_page")||"home",
-  data: {},
-  cart: JSON.parse(localStorage.getItem("ab_cart")||"[]"),
-  orderType: "dine_in",
-  selectedTable: null,
-  pollingInterval: null,
+/**
+ * Akshay Bhojanam - Restaurant Management System
+ * Complete Multi-User SPA with Role-Based Dashboards
+ * Fully Dynamic Database Integration
+ */
 
-  async api(path, options={}) {
-    const headers = {"Content-Type":"application/json",...(options.headers||{})};
-    if(this.token) headers.Authorization = `Bearer ${this.token}`;
-    const res = await fetch(path,{...options,headers});
-    if(res.status===401){this.logout(false);throw new Error("Session expired");}
-    if(res.status===403)throw new Error("Access denied");
-    if(!res.ok){const err=await res.json().catch(()=>({message:`HTTP ${res.status}`}));throw new Error(err.message||`HTTP ${res.status}`);}
+const App = {
+  // State Management
+  token: localStorage.getItem("ab_token") || null,
+  user: JSON.parse(localStorage.getItem("ab_user") || "null"),
+  page: localStorage.getItem("ab_page") || "home",
+  data: {},
+  cart: JSON.parse(localStorage.getItem("ab_cart") || "[]"),
+  currentCustomerOrder: null,
+  currentFilter: "all",
+
+  // ============= API LAYER =============
+  async api(path, options = {}) {
+    const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    
+    const res = await fetch(path, { ...options, headers });
+    
+    if (res.status === 401) {
+      this.logout(false);
+      throw new Error("Session expired");
+    }
+    if (res.status === 403) throw new Error("Access denied");
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+      throw new Error(err.message || `HTTP ${res.status}`);
+    }
     return res.json();
   },
 
-  async boot(){if(!this.token||!this.user){this.renderLogin();return;}try{await this.refresh();this.renderApp();this.startPolling();}catch(err){console.error("Boot error:",err);this.logout(false);}},
-  startPolling(){if(this.pollingInterval)clearInterval(this.pollingInterval);this.pollingInterval=setInterval(()=>{if(this.token)this.refresh().then(()=>this.renderApp());},10000);},
-
-  async refresh(){
-    const base=[["/api/menu/items/all","menu"],["/api/menu/categories","categories"]];
-    let role=[];
-    if(this.user.role==="owner"||this.user.role==="admin") role=[["/api/dashboard/stats","stats"],["/api/orders","orders"],["/api/staff","staff"],["/api/sales/summary","sales"],["/api/stock","stock"],["/api/cutlery","cutlery"],["/api/kitchen/queue","kitchen"],["/api/tables","tables"],["/api/payments/all","payments"],["/api/expenses","expenses"]];
-    else if(this.user.role==="manager") role=[["/api/dashboard/stats","stats"],["/api/orders","orders"],["/api/staff","staff"],["/api/stock","stock"],["/api/cutlery","cutlery"],["/api/kitchen/queue","kitchen"],["/api/tables","tables"]];
-    else if(this.user.role==="waiter") role=[["/api/orders","orders"],["/api/kitchen/queue","kitchen"],["/api/tables","tables"]];
-    else role=[["/api/orders/user/"+this.user.id,"myOrders"]];
-    const eps=[...base,...role];
-    const results=await Promise.all(eps.map(([p])=>this.api(p).catch(()=>[])));
-    this.data=Object.fromEntries(eps.map(([_,k],i)=>[k,results[i]]));
+  // ============= INITIALIZATION =============
+  async boot() {
+    if (!this.token || !this.user) {
+      this.renderLogin();
+      return;
+    }
+    try {
+      await this.refresh();
+      this.renderApp();
+    } catch (err) {
+      console.error("Boot error:", err);
+      this.logout(false);
+    }
   },
 
-  async login(u,p){const r=await this.api("/api/auth/login",{method:"POST",body:JSON.stringify({username:u,password:p})});if(!r.success)throw new Error(r.message||"Login failed");this.token=r.token;this.user=r.user;localStorage.setItem("ab_token",this.token);localStorage.setItem("ab_user",JSON.stringify(this.user));this.page="home";await this.boot();},
-  async register(u,p,n,e,ph,r,sk){const res=await this.api("/api/auth/register",{method:"POST",body:JSON.stringify({username:u,password:p,full_name:n,email:e,phone:ph,role:r||"customer",secret_key:sk})});if(!res.success)throw new Error(res.message||"Registration failed");this.token=res.token;this.user=res.user;localStorage.setItem("ab_token",this.token);localStorage.setItem("ab_user",JSON.stringify(this.user));this.page="home";await this.boot();},
-  logout(){if(this.token)this.api("/api/auth/logout",{method:"POST"}).catch(()=>{});if(this.pollingInterval)clearInterval(this.pollingInterval);localStorage.clear();this.token=null;this.user=null;this.cart=[];this.page="home";this.renderLogin();},
-  navigate(p){this.page=p;localStorage.setItem("ab_page",p);this.renderApp();},
+  async refresh() {
+    // All users get menu data
+    const baseEndpoints = [
+      ["/api/menu/items/all", "menu"],
+      ["/api/menu/categories", "categories"],
+    ];
 
-  addToCart(i){const e=this.cart.find(c=>c.id===i.id);if(e)e.quantity+=1;else this.cart.push({...i,quantity:1});this.saveCart();this.renderApp();},
-  removeFromCart(id){this.cart=this.cart.filter(c=>c.id!==id);this.saveCart();this.renderApp();},
-  updateCartQuantity(id,q){const i=this.cart.find(c=>c.id===id);if(i){i.quantity=Math.max(0,q);if(i.quantity===0)this.removeFromCart(id);else{this.saveCart();this.renderApp();}}},
-  saveCart(){localStorage.setItem("ab_cart",JSON.stringify(this.cart));},
-  calculateBill(){const s=this.cart.reduce((a,i)=>a+i.price*i.quantity,0);const t=s*0.05;const sc=s*0.10;return{s,t,sc,total:s+t+sc,count:this.cart.reduce((a,i)=>a+i.quantity,0)};},
+    // Role-specific data
+    let roleEndpoints = [];
+    if (this.user.role === "owner" || this.user.role === "admin") {
+      roleEndpoints = [
+        ["/api/dashboard/stats", "stats"],
+        ["/api/orders", "orders"],
+        ["/api/staff", "staff"],
+        ["/api/sales/summary", "sales"],
+      ];
+    } else if (this.user.role === "manager") {
+      roleEndpoints = [
+        ["/api/dashboard/stats", "stats"],
+        ["/api/orders", "orders"],
+        ["/api/staff", "staff"],
+      ];
+    } else if (this.user.role === "waiter") {
+      roleEndpoints = [
+        ["/api/orders", "orders"],
+      ];
+    }
 
-  async placeOrder(){if(this.cart.length===0){alert("Cart is empty!");return;}const b=this.calculateBill();if(this.orderType==='dine_in'&&!this.selectedTable){alert("Please select a table!");return;}const o=await this.api("/api/orders",{method:"POST",body:JSON.stringify({items:this.cart.map(i=>({menu_item_id:i.id,quantity:i.quantity,unit_price:i.price,name:i.name})),customer_name:this.user.name,customer_id:this.user.id,order_type:this.orderType,table_id:this.selectedTable,subtotal:b.s,tax:b.t,service_charge:b.sc,total_amount:b.total})});if(o.success){this.cart=[];this.saveCart();this.initiateRazorpay(o.order);}},
-
-  initiateRazorpay(order){
-    this.api("/api/payments/create-order",{method:"POST",body:JSON.stringify({amount:order.total_amount,receipt:order.code})}).then(po=>{
-      const rzp=new Razorpay({key:'rzp_test_RzYF4GJPLG8zoR',amount:Math.round(order.total_amount*100),currency:'INR',name:'Akshay Bhojanam',description:`Order ${order.code}`,image:'/assets/अक्षय.svg',order_id:po.id,handler:(res)=>{this.capturePayment(res,order);},prefill:{name:this.user.name,email:this.user.email},theme:{color:'#903f00'}});
-      rzp.open();
-    }).catch(err=>alert('Payment init failed: '+err.message));
+    const endpoints = [...baseEndpoints, ...roleEndpoints];
+    const results = await Promise.all(
+      endpoints.map(([path]) => this.api(path).catch(() => []))
+    );
+    this.data = Object.fromEntries(
+      endpoints.map(([_, key], i) => [key, results[i]])
+    );
   },
 
-  async capturePayment(res,order){try{await this.api("/api/payments/capture",{method:"POST",body:JSON.stringify({paymentId:res.razorpay_payment_id,amount:order.total_amount,orderId:res.razorpay_order_id,orderCode:order.code})});alert('Payment successful! Order: '+order.code);this.page="orders";this.renderApp();}catch(err){alert('Capture failed: '+err.message);}},
-
-  renderApp(){if(!this.token||!this.user){this.renderLogin();return;}if(this.user.role==="customer")this.renderCustomerApp();else this.renderStaffApp();},
-
-  renderCustomerApp(){
-    const c=document.getElementById("app");const b=this.calculateBill();const fm=this.currentFilter==="all"?(this.data.menu||[]):(this.data.menu||[]).filter(i=>i.category===this.currentFilter);const tb=this.data.tables||[];
-    c.innerHTML=`<div class="customer-interface"><div class="customer-header"><div class="header-left"><img src="/assets/अक्षय.svg" class="logo-image"></div><div class="header-center"><h3 style="margin:0;color:#333;">Welcome, ${this.user.name}</h3></div><div class="header-right"><button onclick="App.navigate('orders')" class="btn-secondary">My Orders</button><button onclick="App.logout()" class="btn-secondary">Logout</button></div><div class="customer-body"><div class="order-type-selector"><button class="order-type-btn ${this.orderType==='dine_in'?'active':''}" onclick="App.orderType='dine_in';App.selectedTable=null;App.renderApp()">Dine In</button><button class="order-type-btn ${this.orderType==='parcel'?'active':''}" onclick="App.orderType='parcel';App.selectedTable=null;App.renderApp()">Parcel</button><button class="order-type-btn ${this.orderType==='takeaway'?'active':''}" onclick="App.orderType='takeaway';App.selectedTable=null;App.renderApp()">Takeaway</button></div>${this.orderType==='dine_in'?`<div class="table-selector"><h4>Select Table:</h4><div class="table-grid">${tb.filter(t=>t.status==='available').map(t=>`<button class="table-btn ${App.selectedTable==t.id?'selected':''}" onclick="App.selectedTable=${t.id};App.renderApp()">T-${t.table_number} (${t.capacity}s)</button>`).join('')}</div>`:''}<div class="filters"><button class="filter-btn ${this.currentFilter==='all'?'active':''}" onclick="App.currentFilter='all';App.renderApp()">All</button>${(this.data.categories||[]).map(ct=>`<button class="filter-btn ${App.currentFilter===ct.name?'active':''}" onclick="App.currentFilter='${ct.name}';App.renderApp()">${ct.name}</button>`).join('')}</div><div class="menu-grid">${fm.map(i=>`<div class="menu-card"><div class="menu-card-body"><h4>${i.name}</h4><p class="description">${i.description||''}</p><div class="card-footer"><div class="price-veg"><span class="price">Rs.${i.price}</span><span class="veg-badge ${i.is_vegetarian?'veg':'nonveg'}">${i.is_vegetarian?'Veg':'Non-Veg'}</span></div><button class="btn-primary" onclick="App.addToCart(${JSON.stringify(i).replace(/"/g,'"')})">Add</button></div></div>`).join('')}</div><div class="bill-section"><h3>Bill Summary</h3><div class="cart-items">${this.cart.length===0?'<p class="empty-cart">Cart empty</p>':this.cart.map(i=>`<div class="cart-item"><div class="item-info"><div class="item-name">${i.name}</div><div class="item-price">Rs.${i.price}</div><div class="qty-controls"><button class="qty-btn" onclick="App.updateCartQuantity(${i.id},${i.quantity-1})">-</button><span class="qty-display">${i.quantity}</span><button class="qty-btn" onclick="App.updateCartQuantity(${i.id},${i.quantity+1})">+</button></div><div class="item-subtotal">Rs.${(i.price*i.quantity).toFixed(2)}</div><button class="btn-remove" onclick="App.removeFromCart(${i.id})">x</button></div>`).join('')}</div>${this.cart.length>0?`<div class="bill-breakdown"><div class="bill-row"><span>Subtotal</span><span>Rs.${b.s.toFixed(2)}</span></div><div class="bill-row"><span>Tax</span><span>Rs.${b.t.toFixed(2)}</span></div><div class="bill-row"><span>Service</span><span>Rs.${b.sc.toFixed(2)}</span></div><div class="bill-row total"><span>Total</span><span>Rs.${b.total.toFixed(2)}</span></div><button class="btn-place-order" onclick="App.placeOrder()">Pay & Order</button><button class="btn-secondary" onclick="App.cart=[];App.saveCart();App.renderApp()">Clear</button></div>`:''}</div>`;
+  // ============= AUTHENTICATION =============
+  async login(username, password) {
+    const result = await this.api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    if (!result.success) throw new Error(result.message || "Login failed");
+    this.token = result.token;
+    this.user = result.user;
+    localStorage.setItem("ab_token", this.token);
+    localStorage.setItem("ab_user", JSON.stringify(this.user));
+    this.page = "home";
+    await this.boot();
   },
 
-  renderStaffApp(){
-    const c=document.getElementById("app");const nav=this.getNavItems();
-    c.innerHTML=`<div class="staff-interface"><div class="sidebar"><div class="sidebar-header"><img src="/assets/अक्षय.svg" class="logo-image sidebar-logo"><p>${this.user.name}</p><p class="role-badge">${this.user.role.toUpperCase()}</p></div><nav class="sidebar-nav">${nav.map(i=>`<button class="nav-item ${this.page===i.id?'active':''}" onclick="App.navigate('${i.id}')">${i.icon} ${i.label}</button>`).join('')}</nav><button class="btn-logout" onclick="App.logout()">Logout</button></div><div class="main-content">${this.renderPageContent()}</div>`;
+  async register(username, password, full_name, email, phone, role) {
+    const result = await this.api("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ 
+        username, 
+        password, 
+        full_name, 
+        email, 
+        phone, 
+        role: role || "customer" 
+      }),
+    });
+    if (!result.success) throw new Error(result.message || "Registration failed");
+    this.token = result.token;
+    this.user = result.user;
+    localStorage.setItem("ab_token", this.token);
+    localStorage.setItem("ab_user", JSON.stringify(this.user));
+    this.page = "home";
+    await this.boot();
   },
 
-  getNavItems(){
-    const b=[{id:"home",icon:"📊",label:"Dashboard"}];
-    if(this.user.role==="owner"||this.user.role==="admin")return[...b,{id:"orders",icon:"📋",label:"Orders"},{id:"kitchen",icon:"🔥",label:"Kitchen"},{id:"tables",icon:"🪑",label:"Tables"},{id:"staff",icon:"👥",label:"Staff"},{id:"stock",icon:"📦",label:"Stock"},{id:"cutlery",icon:"🍴",label:"Cutlery"},{id:"sales",icon:"💰",label:"Sales"},{id:"expenses",icon:"📉",label:"Expenses"}];
-    if(this.user.role==="manager")return[...b,{id:"orders",icon:"📋",label:"Orders"},{id:"kitchen",icon:"🔥",label:"Kitchen"},{id:"tables",icon:"🪑",label:"Tables"},{id:"staff",icon:"👥",label:"Staff"},{id:"stock",icon:"📦",label:"Stock"},{id:"cutlery",icon:"🍴",label:"Cutlery"}];
-    if(this.user.role==="waiter")return[{id:"orders",icon:"📋",label:"Orders"},{id:"kitchen",icon:"🔥",label:"Kitchen"},{id:"tables",icon:"🪑",label:"Tables"}];
-    return b;
+  async logout() {
+    if (this.token) {
+      await this.api("/api/auth/logout", { method: "POST" }).catch(() => {});
+    }
+    localStorage.removeItem("ab_token");
+    localStorage.removeItem("ab_user");
+    localStorage.removeItem("ab_page");
+    localStorage.removeItem("ab_cart");
+    this.token = null;
+    this.user = null;
+    this.cart = [];
+    this.page = "home";
+    this.currentFilter = "all";
+    this.renderLogin();
   },
 
-  renderPageContent(){switch(this.page){case"home":return this.renderDashboard();case"orders":return this.renderOrdersPage();case"kitchen":return this.renderKitchenPage();case"tables":return this.renderTablesPage();case"staff":return this.renderStaffPage();case"stock":return this.renderStockPage();case"cutlery":return this.renderCutleryPage();case"sales":return this.renderSalesPage();case"expenses":return this.renderExpensesPage();default:return this.renderDashboard();}},
-
-  renderDashboard(){const s=this.data.stats||{};return`<div class="page-content"><h1>Dashboard</h1><div class="stats-grid"><div class="stat-card"><div class="stat-value">Rs.${(s.todaysSales||0).toLocaleString()}</div><div class="stat-label">Today's Sales</div><div class="stat-card"><div class="stat-value">${s.activeOrders||0}</div><div class="stat-label">Active Orders</div><div class="stat-card"><div class="stat-value">${s.activeTables||0}/${s.totalTables||30}</div><div class="stat-label">Tables</div><div class="stat-card"><div class="stat-value">${s.staffOnDuty||0}</div><div class="stat-label">Staff</div></div>`;},
-
-  renderOrdersPage(){
-    const o=(this.data.orders||[]).filter(ord=>{if(this.currentFilter==='all')return true;if(this.currentFilter==='paid')return ord.payment_status==='paid';if(this.currentFilter==='unpaid')return ord.payment_status==='unpaid';return ord.status===this.currentFilter;});
-    return`<div class="page-content"><h1>Orders</h1><div class="orders-filters"><button onclick="App.currentFilter='all';App.renderApp()" class="filter-btn ${this.currentFilter==='all'?'active':''}">All</button><button onclick="App.currentFilter='pending';App.renderApp()" class="filter-btn ${this.currentFilter==='pending'?'active':''}">Pending</button><button onclick="App.currentFilter='preparing';App.renderApp()" class="filter-btn ${this.currentFilter==='preparing'?'active':''}">Preparing</button><button onclick="App.currentFilter='ready';App.renderApp()" class="filter-btn ${this.currentFilter==='ready'?'active':''}">Ready</button><button onclick="App.currentFilter='paid';App.renderApp()" class="filter-btn ${this.currentFilter==='paid'?'active':''}">Paid</button><button onclick="App.currentFilter='unpaid';App.renderApp()" class="filter-btn ${this.currentFilter==='unpaid'?'active':''}">Unpaid</button></div><table class="orders-table"><thead><tr><th>Code</th><th>Customer</th><th>Type</th><th>Amount</th><th>Status</th><th>Payment</th><th>Actions</th></tr></thead><tbody>${o.length===0?'<tr><td colspan="7">No orders</td></tr>':o.map(order=>`<tr><td><strong>${order.code}</strong></td><td>${order.customer_name}</td><td>${order.order_type}</td><td>Rs.${order.total_amount?.toFixed(2)||'0.00'}</td><td><span class="status-badge ${order.status}">${order.status}</span></td><td><span class="payment-badge ${order.payment_status||'unpaid'}">${order.payment_status||'unpaid'}</span></td><td>${this.renderOrderActions(order)}</td></tr>`).join('')}</tbody></table></div>`;
+  // ============= NAVIGATION =============
+  navigate(page) {
+    this.page = page;
+    this.currentFilter = "all";
+    localStorage.setItem("ab_page", page);
+    this.renderApp();
   },
 
-  renderOrderActions(o){
-    if(this.user.role==='waiter'){if(o.status==='pending')return`<button class="btn-action" onclick="App.updateOrderStatus(${o.id},'confirmed')">Confirm</button>`;if(o.status==='confirmed')return`<button class="btn-action" onclick="App.updateOrderStatus(${o.id},'preparing')">Kitchen</button>`;if(o.status==='ready')return`<button class="btn-action" onclick="App.updateOrderStatus(${o.id},'served')">Serve</button>`;if(o.status==='served')return`<button class="btn-action" onclick="App.updateOrderStatus(${o.id},'completed')">Done</button>`;return'';}
-    let a='';if(o.status==='pending')a+=`<button class="btn-action" onclick="App.updateOrderStatus(${o.id},'confirmed')">Confirm</button>`;if(o.status==='confirmed')a+=`<button class="btn-action" onclick="App.updateOrderStatus(${o.id},'preparing')">Kitchen</button>`;if(o.status==='preparing')a+=`<button class="btn-action" onclick="App.updateOrderStatus(${o.id},'ready')">Ready</button>`;if(o.status==='ready')a+=`<button class="btn-action" onclick="App.updateOrderStatus(${o.id},'served')">Serve</button>`;if(o.status==='served')a+=`<button class="btn-action" onclick="App.updateOrderStatus(${o.id},'completed')">Done</button>`;if(o.status!=='cancelled'&&o.status!=='completed')a+=`<button class="btn-action danger" onclick="App.updateOrderStatus(${o.id},'cancelled')">Cancel</button>`;if(o.payment_status==='unpaid')a+=`<button class="btn-action pay" onclick="App.markOrderPaid(${o.id})">Mark Paid</button>`;return a;
+  setFilter(category) {
+    this.currentFilter = category;
+    this.renderApp();
   },
 
-  async updateOrderStatus(id,s){try{await this.api(`/api/orders/${id}/status`,{method:"PUT",body:JSON.stringify({status:s})});await this.refresh();this.renderApp();}catch(err){alert('Failed: '+err.message);}},
-  async markOrderPaid(id){try{await this.api(`/api/orders/${id}/payment`,{method:"PUT",body:JSON.stringify({payment_status:'paid',payment_method:'cash'})});await this.refresh();this.renderApp();}catch(err){alert('Failed: '+err.message);}},
-
-  renderKitchenPage(){const q=this.data.kitchen||[];return`<div class="page-content"><h1>Kitchen Queue</h1><div class="kitchen-grid">${q.length===0?'<p>Queue empty</p>':q.map(i=>`<div class="kitchen-card ${i.status}"><div class="kitchen-header"><span>${i.order_code}</span><span class="priority ${i.priority}">${i.priority}</span></div><h4>${i.item_name}</h4><p>Status: <span class="status-badge ${i.status}">${i.status}</span></p><div class="kitchen-actions">${i.status==='queued'?`<button class="btn-action" onclick="App.startKitchenItem(${i.id})">Start</button>`:''}${i.status==='in_progress'?`<button class="btn-action success" onclick="App.completeKitchenItem(${i.id})">Complete</button>`:''}</div>`).join('')}</div>`;},
-  async startKitchenItem(id){try{await this.api(`/api/kitchen/queue/${id}/start`,{method:"PUT"});await this.refresh();this.renderApp();}catch(err){alert('Failed: '+err.message);}},
-  async completeKitchenItem(id){try{await this.api(`/api/kitchen/queue/${id}/complete`,{method:"PUT"});await this.refresh();this.renderApp();}catch(err){alert('Failed: '+err.message);}},
-
-  renderTablesPage(){const t=this.data.tables||[];return`<div class="page-content"><h1>Tables</h1><div class="table-status-grid">${t.map(tb=>`<div class="table-card ${tb.status}" onclick="App.showTableModal(${tb.id})"><div class="table-number">${tb.table_number}</div><div class="table-capacity">${tb.capacity} seats</div><div class="table-status">${tb.status}</div>${tb.waiter_name?`<div class="table-waiter">${tb.waiter_name}</div>`:''}</div>`).join('')}</div>`;},
-
-  async showTableModal(tid){
-    const tb=(this.data.tables||[]).find(t=>t.id===tid);if(!tb)return;const w=(this.data.staff||[]).filter(s=>s.role==='waiter');
-    const modal=document.getElementById('modal');const overlay=document.getElementById('modal-overlay');
-    modal.innerHTML=`<div class="modal-header"><h2>Table ${tb.table_number}</h2><button onclick="App.closeModal()" class="btn-close">x</button></div><div class="modal-body"><p>Capacity: ${tb.capacity} seats</p><p>Status: <span class="status-badge ${tb.status}">${tb.status}</span></p>${tb.waiter_name?`<p>Waiter: ${tb.waiter_name}</p>`:''}<h4>Change Status:</h4><div class="status-buttons"><button class="btn-action" onclick="App.updateTableStatus(${tb.id},'available')">Available</button><button class="btn-action" onclick="App.updateTableStatus(${tb.id},'occupied')">Occupied</button><button class="btn-action" onclick="App.updateTableStatus(${tb.id},'reserved')">Reserved</button><button class="btn-action" onclick="App.updateTableStatus(${tb.id},'maintenance')">Maintenance</button></div><h4>Assign Waiter:</h4><select onchange="App.assignWaiter(${tb.id},this.value)"><option value="">None</option>${w.map(x=>`<option value="${x.id}" ${tb.assigned_waiter_id==x.id?'selected':''}>${x.name}</option>`).join('')}</select></div>`;
-    modal.style.display='block';overlay.style.display='block';
+  // ============= CART MANAGEMENT =============
+  addToCart(item) {
+    const existing = this.cart.find(c => c.id === item.id);
+    if (existing) {
+      existing.quantity += 1;
+    } else {
+      this.cart.push({ ...item, quantity: 1 });
+    }
+    this.saveCart();
+    this.renderApp();
   },
 
-  async updateTableStatus(id,s){try{await this.api(`/api/tables/${id}/status`,{method:"PUT",body:JSON.stringify({status:s})});await this.refresh();this.renderApp();this.closeModal();}catch(err){alert('Failed: '+err.message);}},
-  async assignWaiter(tid,wid){try{await this.api(`/api/tables/${tid}/status`,{method:"PUT",body:JSON.stringify({status:'occupied',waiter_id:wid||null})});await this.refresh();this.renderApp();}catch(err){alert('Failed: '+err.message);}},
-
-  renderStaffPage(){const s=this.data.staff||[];return`<div class="page-content"><h1>Staff</h1>${this.user.role==='owner'||this.user.role==='admin'?`<button class="btn-primary" onclick="App.showAddStaffModal()">+ Add Staff</button>`:''}<div class="staff-grid">${s.map(p=>`<div class="staff-card"><h3>${p.name}</h3><p>Role: ${p.role}</p><p>Email: ${p.email}</p><p>Phone: ${p.phone}</p><p>Salary: Rs.${p.salary||0}</p><p>Status: ${p.active?'Active':'Inactive'}</p></div>`).join('')}</div>`;},
-
-  showAddStaffModal(){const modal=document.getElementById('modal');const overlay=document.getElementById('modal-overlay');modal.innerHTML=`<div class="modal-header"><h2>Add Staff</h2><button onclick="App.closeModal()" class="btn-close">x</button></div><div class="modal-body"><form onsubmit="event.preventDefault();App.addStaff()"><div class="form-group"><label>Full Name</label><input type="text" id="staff-name" required></div><div class="form-group"><label>Username</label><input type="text" id="staff-user" required></div><div class="form-group"><label>Email</label><input type="email" id="staff-email" required></div><div class="form-group"><label>Phone</label><input type="text" id="staff-phone"></div><div class="form-group"><label>Password</label><input type="password" id="staff-pass" required></div><div class="form-group"><label>Role</label><select id="staff-role"><option value="waiter">Waiter</option><option value="manager">Manager</option></select></div><div class="form-group"><label>Salary</label><input type="number" id="staff-salary" value="18000"></div><button type="submit" class="btn-primary">Add Staff</button></form></div>`;modal.style.display='block';overlay.style.display='block';},
-
-  async addStaff(){const n=document.getElementById('staff-name').value;const u=document.getElementById('staff-user').value;const e=document.getElementById('staff-email').value;const p=document.getElementById('staff-phone').value;const pa=document.getElementById('staff-pass').value;const r=document.getElementById('staff-role').value;const s=document.getElementById('staff-salary').value;try{await this.api('/api/staff',{method:'POST',body:JSON.stringify({username:u,password:pa,full_name:n,email:e,phone:p,role:r,salary:parseFloat(s)})});this.closeModal();await this.refresh();this.renderApp();}catch(err){alert('Failed: '+err.message);}},
-
-  renderStockPage(){const s=this.data.stock||[];const a=(this.data.stock||[]).filter(x=>x.quantity<=x.min_threshold);return`<div class="page-content"><h1>Stock</h1>${a.length>0?`<div class="alert-box"><h4>Low Stock Alerts:</h4>${a.map(x=>`<p>${x.item_name}: ${x.quantity} ${x.unit} (min: ${x.min_threshold})</p>`).join('')}</div>`:''}<table class="data-table"><thead><tr><th>Item</th><th>Category</th><th>Qty</th><th>Unit</th><th>Min</th><th>Cost</th></tr></thead><tbody>${s.map(i=>`<tr class="${i.quantity<=i.min_threshold?'low-stock':''}"><td>${i.item_name}</td><td>${i.category}</td><td>${i.quantity}</td><td>${i.unit}</td><td>${i.min_threshold}</td><td>Rs.${i.cost_per_unit}</td></tr>`).join('')}</tbody></table></div>`;},
-
-  renderCutleryPage(){const c=this.data.cutlery||[];return`<div class="page-content"><h1>Cutlery</h1><table class="data-table"><thead><tr><th>Item</th><th>Total</th><th>Available</th><th>In Use</th><th>Damaged</th></tr></thead><tbody>${c.map(i=>`<tr><td>${i.item_name}</td><td>${i.total_count}</td><td>${i.available_count}</td><td>${i.in_use_count}</td><td>${i.damaged_count}</td></tr>`).join('')}</tbody></table></div>`;},
-
-  renderSalesPage(){const s=this.data.sales||{};return`<div class="page-content"><h1>Sales</h1><div class="sales-grid"><div class="sales-card"><h3>Daily</h3><p class="amount">Rs.${(s.dailyRevenue||0).toLocaleString()}</p></div><div class="sales-card"><h3>Weekly</h3><p class="amount">Rs.${(s.weeklyRevenue||0).toLocaleString()}</p></div><div class="sales-card"><h3>Monthly</h3><p class="amount">Rs.${(s.monthlyRevenue||0).toLocaleString()}</p></div>${s.paymentBreakdown?`<div style="margin-top:30px"><h3>Payments</h3><table class="data-table"><thead><tr><th>Method</th><th>Amount</th></tr></thead><tbody>${s.paymentBreakdown.map(pb=>`<tr><td>${pb.method||pb.payment_method||'Unknown'}</td><td>Rs.${pb.amount}</td></tr>`).join('')}</tbody></table></div>`:''}</div>`;},
-
-  renderExpensesPage(){const e=this.data.expenses||[];return`<div class="page-content"><h1>Expenses</h1><button class="btn-primary" onclick="App.showAddExpenseModal()">+ Add Expense</button><table class="data-table"><thead><tr><th>Category</th><th>Description</th><th>Amount</th><th>Date</th><th>By</th></tr></thead><tbody>${e.length===0?'<tr><td colspan="5">No expenses</td></tr>':e.map(x=>`<tr><td>${x.category}</td><td>${x.description}</td><td>Rs.${x.amount}</td><td>${new Date(x.expense_date).toLocaleDateString()}</td><td>${x.recorded_by_name||'-'}</td></tr>`).join('')}</tbody></table></div>`;},
-
-  showAddExpenseModal(){const modal=document.getElementById('modal');const overlay=document.getElementById('modal-overlay');modal.innerHTML=`<div class="modal-header"><h2>Add Expense</h2><button onclick="App.closeModal()" class="btn-close">x</button></div><div class="modal-body"><form onsubmit="event.preventDefault();App.addExpense()"><div class="form-group"><label>Category</label><select id="exp-cat"><option>Salary</option><option>Inventory</option><option>Utilities</option><option>Maintenance</option><option>Other</option></select></div><div class="form-group"><label>Description</label><input type="text" id="exp-desc" required></div><div class="form-group"><label>Amount</label><input type="number" id="exp-amt" required></div><button type="submit" class="btn-primary">Add</button></form></div>`;modal.style.display='block';overlay.style.display='block';},
-
-  async addExpense(){const c=document.getElementById('exp-cat').value;const d=document.getElementById('exp-desc').value;const a=document.getElementById('exp-amt').value;try{await this.api('/api/expenses',{method:'POST',body:JSON.stringify({category:c,description:d,amount:parseFloat(a)})});this.closeModal();await this.refresh();this.renderApp();}catch(err){alert('Failed: '+err.message);}},
-
-  closeModal(){document.getElementById('modal').style.display='none';document.getElementById('modal-overlay').style.display='none';},
-
-  renderLogin(){
-    const c=document.getElementById("app");
-    c.innerHTML='<div class="login-container"><div class="login-box"><img src="/assets/%E0%A4%85%E0%A4%95%E0%A5%8D%E0%A4%B7%E0%A4%AF.svg" class="logo-image login-logo"><h2>Restaurant Management</h2><div class="form-tabs"><button class="tab-btn active" onclick="App.showLoginForm()">Login</button><button class="tab-btn" onclick="App.showRegisterForm()">Register</button></div><div id="login-form" class="form-content"><form onsubmit="event.preventDefault();App.handleLogin()"><div class="form-group"><label>Username</label><input type="text" id="login-username" placeholder="Username" required></div><div class="form-group"><label>Password</label><input type="password" id="login-password" placeholder="Password" required></div><button type="submit" class="btn-primary btn-large">Login</button></form><div style="margin-top:15px;font-size:12px;color:#666;"><p><strong>Demo logins:</strong></p><p>Owner: apurva / SaiBaba</p><p>Manager: shripad_deshpande / staff@2024</p><p>Waiter: parth_sahasrabuddhe / staff@2024</p><p>Customer: rajesh_kumar / customer@2024</p></div></div><div id="register-form" class="form-content" style="display:none"><form onsubmit="event.preventDefault();App.handleRegister()"><div class="form-group"><label>Full Name</label><input type="text" id="reg-name" required></div><div class="form-group"><label>Username</label><input type="text" id="reg-user" required></div><div class="form-group"><label>Email</label><input type="email" id="reg-email" required></div><div class="form-group"><label>Phone</label><input type="text" id="reg-phone"></div><div class="form-group"><label>Password</label><input type="password" id="reg-pass" required></div><div class="form-group"><label>Account Type</label><select id="reg-role" onchange="App.toggleSecretKey()"><option value="customer">Customer</option><option value="waiter">Waiter</option><option value="manager">Manager</option><option value="owner">Owner</option></select></div><div class="form-group" id="secret-key-group" style="display:none"><label>Owner Secret Key</label><input type="password" id="reg-secret" placeholder="Enter secret key"></div><button type="submit" class="btn-primary btn-large">Register</button></form></div></div></div>';
+  removeFromCart(itemId) {
+    this.cart = this.cart.filter(c => c.id !== itemId);
+    this.saveCart();
+    this.renderApp();
   },
 
-  showLoginForm(){document.getElementById("login-form").style.display="block";document.getElementById("register-form").style.display="none";document.querySelectorAll(".tab-btn")[0].classList.add("active");document.querySelectorAll(".tab-btn")[1].classList.remove("active");},
-  showRegisterForm(){document.getElementById("login-form").style.display="none";document.getElementById("register-form").style.display="block";document.querySelectorAll(".tab-btn")[0].classList.remove("active");document.querySelectorAll(".tab-btn")[1].classList.add("active");},
-  toggleSecretKey(){const role=document.getElementById('reg-role').value;document.getElementById('secret-key-group').style.display=role==='owner'?'block':'none';},
+  updateCartQuantity(itemId, quantity) {
+    const item = this.cart.find(c => c.id === itemId);
+    if (item) {
+      item.quantity = Math.max(0, quantity);
+      if (item.quantity === 0) {
+        this.removeFromCart(itemId);
+      } else {
+        this.saveCart();
+        this.renderApp();
+      }
+    }
+  },
 
-  async handleLogin(){try{const u=document.getElementById('login-username').value;const p=document.getElementById('login-password').value;await this.login(u,p);}catch(err){alert('Login failed: '+err.message);}},
-  async handleRegister(){try{const n=document.getElementById('reg-name').value;const u=document.getElementById('reg-user').value;const e=document.getElementById('reg-email').value;const p=document.getElementById('reg-phone').value;const pa=document.getElementById('reg-pass').value;const r=document.getElementById('reg-role').value;const s=document.getElementById('reg-secret').value;await this.register(u,pa,n,e,p,r,s);}catch(err){alert('Registration failed: '+err.message);}}
+  saveCart() {
+    localStorage.setItem("ab_cart", JSON.stringify(this.cart));
+  },
+
+  calculateBill() {
+    const subtotal = this.cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const tax = subtotal * 0.05;
+    const serviceCharge = subtotal * 0.10;
+    const total = subtotal + tax + serviceCharge;
+    return {
+      subtotal,
+      tax,
+      serviceCharge,
+      total,
+      itemCount: this.cart.reduce((sum, item) => sum + item.quantity, 0),
+    };
+  },
+
+  async placeOrder() {
+    if (this.cart.length === 0) {
+      alert("Cart is empty!");
+      return;
+    }
+
+    const bill = this.calculateBill();
+    const order = await this.api("/api/orders", {
+      method: "POST",
+      body: JSON.stringify({
+        items: this.cart.map(item => ({
+          menu_item_id: item.id,
+          quantity: item.quantity,
+          unit_price: item.price,
+        })),
+        customer_name: this.user.name,
+        customer_id: this.user.id,
+        order_type: "takeaway",
+        subtotal: bill.subtotal,
+        tax: bill.tax,
+        service_charge: bill.serviceCharge,
+        total_amount: bill.total,
+      }),
+    });
+
+    if (order.success) {
+      this.currentCustomerOrder = order.order;
+      this.cart = [];
+      this.saveCart();
+      alert(`Order placed successfully!\nOrder Code: ${order.order.code}\nTotal: ₹${order.order.total_amount.toFixed(2)}`);
+      this.page = "home";
+      this.renderApp();
+    }
+  },
+
+  // ============= RENDERING - MAIN APP =============
+  renderApp() {
+    if (!this.token || !this.user) {
+      this.renderLogin();
+      return;
+    }
+
+    if (this.user.role === "customer") {
+      this.renderCustomerApp();
+    } else {
+      this.renderStaffApp();
+    }
+  },
+
+  // ============= CUSTOMER INTERFACE =============
+  renderCustomerApp() {
+    const container = document.getElementById("app");
+    const bill = this.calculateBill();
+    const filteredMenu = this.currentFilter === "all" 
+      ? this.data.menu || []
+      : (this.data.menu || []).filter(item => item.category === this.currentFilter);
+
+    container.innerHTML = `
+      <div class="customer-interface">
+        <!-- Header -->
+        <div class="customer-header">
+          <div class="header-left">
+            <h2 style="margin:0; color: #903f00;">🍜 Akshay Bhojanam</h2>
+          </div>
+          <div class="header-center">
+            <h3 style="margin:0; color: #333;">Welcome, ${this.user.name}</h3>
+          </div>
+          <div class="header-right">
+            <button onclick="App.navigate('orders')" class="btn-secondary">📋 My Orders</button>
+            <button onclick="App.logout()" class="btn-secondary">🚪 Logout</button>
+          </div>
+        </div>
+
+        <div class="customer-body">
+          <!-- Menu Section -->
+          <div class="menu-section">
+            <div class="filters">
+              <button class="filter-btn ${this.currentFilter === 'all' ? 'active' : ''}" 
+                onclick="App.setFilter('all')">All Items</button>
+              ${(this.data.categories || []).map(cat => `
+                <button class="filter-btn ${this.currentFilter === cat.name ? 'active' : ''}" 
+                  onclick="App.setFilter('${cat.name}')">${cat.name}</button>
+              `).join('')}
+            </div>
+
+            <div class="menu-grid">
+              ${filteredMenu.map(item => `
+                <div class="menu-card">
+                  <div class="menu-card-body">
+                    <h4>${item.name}</h4>
+                    <p class="description">${item.description || 'Fresh & delicious'}</p>
+                    <div class="card-footer">
+                      <div class="price-veg">
+                        <span class="price">₹${item.price}</span>
+                        <span class="veg-badge ${item.is_vegetarian ? 'veg' : 'nonveg'}">
+                          ${item.is_vegetarian ? '🟢 Veg' : '🔴 Non-Veg'}
+                        </span>
+                      </div>
+                      <button class="btn-primary" onclick="App.addToCart(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+                        Add to Cart
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+
+        <!-- Bill Panel -->
+        <div class="bill-section">
+          <h3>🧾 Bill Summary</h3>
+          <div class="cart-items">
+            ${this.cart.length === 0 ? '<p class="empty-cart">Cart is empty</p>' : this.cart.map(item => `
+              <div class="cart-item">
+                <div class="item-info">
+                  <div class="item-name">${item.name}</div>
+                  <div class="item-price">₹${item.price}</div>
+                </div>
+                <div class="qty-controls">
+                  <button class="qty-btn" onclick="App.updateCartQuantity(${item.id}, ${item.quantity - 1})">−</button>
+                  <span class="qty-display">${item.quantity}</span>
+                  <button class="qty-btn" onclick="App.updateCartQuantity(${item.id}, ${item.quantity + 1})">+</button>
+                </div>
+                <div class="item-subtotal">₹${(item.price * item.quantity).toFixed(2)}</div>
+                <button class="btn-remove" onclick="App.removeFromCart(${item.id})">✕</button>
+              </div>
+            `).join('')}
+          </div>
+
+          ${this.cart.length > 0 ? `
+            <div class="bill-breakdown">
+              <div class="bill-row">
+                <span>Subtotal</span>
+                <span>₹${bill.subtotal.toFixed(2)}</span>
+              </div>
+              <div class="bill-row">
+                <span>Tax (5%)</span>
+                <span>₹${bill.tax.toFixed(2)}</span>
+              </div>
+              <div class="bill-row">
+                <span>Service (10%)</span>
+                <span>₹${bill.serviceCharge.toFixed(2)}</span>
+              </div>
+              <div class="bill-row total">
+                <span>Total</span>
+                <span>₹${bill.total.toFixed(2)}</span>
+              </div>
+              <button class="btn-place-order" onclick="App.placeOrder()">Place Order</button>
+              <button class="btn-secondary" onclick="App.cart = []; App.saveCart(); App.renderApp()">Clear Cart</button>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  },
+
+  // ============= STAFF/ADMIN INTERFACES =============
+  renderStaffApp() {
+    const container = document.getElementById("app");
+    const navItems = this.getNavItems();
+
+    container.innerHTML = `
+      <div class="staff-interface">
+        <!-- Sidebar Navigation -->
+        <div class="sidebar">
+          <div class="sidebar-header">
+            <h2>🍜 Akshay Bhojanam</h2>
+            <p>${this.user.name}</p>
+            <p class="role-badge">${this.user.role.toUpperCase()}</p>
+          </div>
+          <nav class="sidebar-nav">
+            ${navItems.map(item => `
+              <button class="nav-item ${this.page === item.id ? 'active' : ''}" 
+                onclick="App.navigate('${item.id}')">${item.icon} ${item.label}</button>
+            `).join('')}
+          </nav>
+          <button class="btn-logout" onclick="App.logout()">🚪 Logout</button>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+          ${this.renderPageContent()}
+        </div>
+      </div>
+    `;
+  },
+
+  getNavItems() {
+    const baseItems = [{ id: "home", icon: "📊", label: "Dashboard" }];
+    
+    if (this.user.role === "owner" || this.user.role === "admin") {
+      return [
+        ...baseItems,
+        { id: "orders", icon: "📋", label: "Orders" },
+        { id: "staff", icon: "👥", label: "Staff" },
+        { id: "menu", icon: "🍽️", label: "Menu" },
+        { id: "sales", icon: "💰", label: "Sales" },
+      ];
+    } else if (this.user.role === "manager") {
+      return [
+        ...baseItems,
+        { id: "orders", icon: "📋", label: "Orders" },
+        { id: "staff", icon: "👥", label: "Staff" },
+        { id: "menu", icon: "🍽️", label: "Menu" },
+      ];
+    } else if (this.user.role === "waiter") {
+      return [
+        { id: "orders", icon: "📋", label: "Orders" },
+        { id: "menu", icon: "🍽️", label: "Menu" },
+      ];
+    }
+    return baseItems;
+  },
+
+  renderPageContent() {
+    switch (this.page) {
+      case "home":
+        return this.renderDashboard();
+      case "orders":
+        return this.renderOrdersPage();
+      case "staff":
+        return this.renderStaffPage();
+      case "menu":
+        return this.renderMenuPage();
+      case "sales":
+        return this.renderSalesPage();
+      default:
+        return this.renderDashboard();
+    }
+  },
+
+  renderDashboard() {
+    const stats = this.data.stats || {};
+    return `
+      <div class="page-content">
+        <h1>📊 Dashboard</h1>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value">₹${(stats.todaysSales || 0).toLocaleString()}</div>
+            <div class="stat-label">Today's Sales</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${stats.activeOrders || 0}</div>
+            <div class="stat-label">Active Orders</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${stats.activeTables || 0} / ${stats.totalTables || 30}</div>
+            <div class="stat-label">Tables Occupied</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value">${stats.staffOnDuty || 0}</div>
+            <div class="stat-label">Staff On Duty</div>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  renderOrdersPage() {
+    const orders = this.data.orders || [];
+    return `
+      <div class="page-content">
+        <h1>📋 Orders</h1>
+        <div class="orders-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Order Code</th>
+                <th>Customer</th>
+                <th>Type</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${orders.slice(0, 20).map(order => `
+                <tr>
+                  <td>${order.code}</td>
+                  <td>${order.customer_name}</td>
+                  <td>${order.order_type}</td>
+                  <td>₹${order.total_amount.toFixed(2)}</td>
+                  <td><span class="status-badge ${order.status}">${order.status}</span></td>
+                  <td>${order.created_at}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  },
+
+  renderStaffPage() {
+    const staff = this.data.staff || [];
+    return `
+      <div class="page-content">
+        <h1>👥 Staff Directory</h1>
+        <div class="staff-grid">
+          ${staff.map(person => `
+            <div class="staff-card">
+              <h3>${person.name}</h3>
+              <p><strong>Role:</strong> ${person.role}</p>
+              <p><strong>Email:</strong> ${person.email}</p>
+              <p><strong>Phone:</strong> ${person.phone}</p>
+              <p><strong>Status:</strong> ${person.active ? '✅ Active' : '⛔ Inactive'}</p>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  },
+
+  renderMenuPage() {
+    const menu = this.data.menu || [];
+    return `
+      <div class="page-content">
+        <h1>🍽️ Menu Management</h1>
+        <div class="menu-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Category</th>
+                <th>Price</th>
+                <th>Type</th>
+                <th>Available</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${menu.map(item => `
+                <tr>
+                  <td>${item.name}</td>
+                  <td>${item.category}</td>
+                  <td>₹${item.price}</td>
+                  <td>${item.is_vegetarian ? '🟢 Veg' : '🔴 Non-Veg'}</td>
+                  <td>${item.is_available ? '✅ Yes' : '❌ No'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  },
+
+  renderSalesPage() {
+    const sales = this.data.sales || {};
+    return `
+      <div class="page-content">
+        <h1>💰 Sales Report</h1>
+        <div class="sales-grid">
+          <div class="sales-card">
+            <h3>Daily Revenue</h3>
+            <p class="amount">₹${(sales.dailyRevenue || 0).toLocaleString()}</p>
+          </div>
+          <div class="sales-card">
+            <h3>Weekly Revenue</h3>
+            <p class="amount">₹${(sales.weeklyRevenue || 0).toLocaleString()}</p>
+          </div>
+          <div class="sales-card">
+            <h3>Monthly Revenue</h3>
+            <p class="amount">₹${(sales.monthlyRevenue || 0).toLocaleString()}</p>
+          </div>
+        </div>
+        ${sales.paymentBreakdown ? `
+          <div style="margin-top: 30px;">
+            <h3>Payment Breakdown</h3>
+            <table>
+              <thead>
+                <tr><th>Method</th><th>Amount</th></tr>
+              </thead>
+              <tbody>
+                ${sales.paymentBreakdown.map(pb => `
+                  <tr>
+                    <td>${pb.method}</td>
+                    <td>₹${pb.amount.toLocaleString()}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  },
+
+  // ============= LOGIN & REGISTRATION =============
+  renderLogin() {
+    const container = document.getElementById("app");
+    container.innerHTML = `
+      <div class="login-container">
+        <div class="login-box">
+          <h1>🍜 Akshay Bhojanam</h1>
+          <h2>Restaurant Management System</h2>
+          
+          <div class="form-tabs">
+            <button class="tab-btn active" onclick="App.showLoginForm()">Login</button>
+            <button class="tab-btn" onclick="App.showRegisterForm()">Create Account</button>
+          </div>
+
+          <div id="login-form" class="form-content">
+            <form onsubmit="event.preventDefault(); App.handleLogin()">
+              <div class="form-group">
+                <label>Username</label>
+                <input type="text" id="login-username" placeholder="Enter username" required>
+              </div>
+              <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="login-password" placeholder="Enter password" required>
+              </div>
+              <button type="submit" class="btn-primary btn-large">Login</button>
+            </form>
+          </div>
+
+          <div id="register-form" class="form-content" style="display: none;">
+            <form onsubmit="event.preventDefault(); App.handleRegister()">
+              <div class="form-group">
+                <label>Full Name</label>
+                <input type="text" id="reg-fullname" placeholder="Your full name" required>
+              </div>
+              <div class="form-group">
+                <label>Username</label>
+                <input type="text" id="reg-username" placeholder="Choose username" required>
+              </div>
+              <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="reg-email" placeholder="Your email" required>
+              </div>
+              <div class="form-group">
+                <label>Phone</label>
+                <input type="text" id="reg-phone" placeholder="Your phone (optional)">
+              </div>
+              <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="reg-password" placeholder="Strong password" required>
+              </div>
+              <div class="form-group">
+                <label>Account Type</label>
+                <select id="reg-role" required>
+                  <option value="customer">Customer (Place Orders)</option>
+                  <option value="waiter">Waiter (Staff)</option>
+                  <option value="manager">Manager (Admin)</option>
+                </select>
+              </div>
+              <button type="submit" class="btn-primary btn-large">Create Account</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  showLoginForm() {
+    document.getElementById("login-form").style.display = "block";
+    document.getElementById("register-form").style.display = "none";
+    document.querySelectorAll(".tab-btn")[0].classList.add("active");
+    document.querySelectorAll(".tab-btn")[1].classList.remove("active");
+  },
+
+  showRegisterForm() {
+    document.getElementById("login-form").style.display = "none";
+    document.getElementById("register-form").style.display = "block";
+    document.querySelectorAll(".tab-btn")[0].classList.remove("active");
+    document.querySelectorAll(".tab-btn")[1].classList.add("active");
+  },
+
+  async handleLogin() {
+    try {
+      const username = document.getElementById("login-username").value;
+      const password = document.getElementById("login-password").value;
+      await this.login(username, password);
+    } catch (err) {
+      alert("Login failed: " + err.message);
+    }
+  },
+
+  async handleRegister() {
+    try {
+      const fullName = document.getElementById("reg-fullname").value;
+      const username = document.getElementById("reg-username").value;
+      const email = document.getElementById("reg-email").value;
+      const phone = document.getElementById("reg-phone").value;
+      const password = document.getElementById("reg-password").value;
+      const role = document.getElementById("reg-role").value;
+      await this.register(username, password, fullName, email, phone, role);
+    } catch (err) {
+      alert("Registration failed: " + err.message);
+    }
+  },
 };
 
-document.addEventListener("DOMContentLoaded",()=>{App.boot();});
+// ============= INITIALIZATION =============
+document.addEventListener("DOMContentLoaded", () => {
+  App.boot();
+});
